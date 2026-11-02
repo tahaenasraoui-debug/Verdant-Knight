@@ -1,5 +1,5 @@
 
-# 🌿 The Verdant Knight: Chronicles of the Realm
+# The Verdant Knight: Chronicles of the Realm
 
 > An offline-first naturalist RPG powered by on-device open-weight AI (WebGPU).  
 > Built for the **Hacktoberfest Open-Source AI Challenge — Week 1: "Touch Grass"**.
@@ -12,13 +12,13 @@
 
 ---
 
-## 🎬 Demo
+## Demo
 
 * **Live Web App:** [Play The Verdant Knight](https://tahaenasraoui-debug.github.io/The-Verdant-Knight-Chronicles-of-the-Realm/)
 
 ---
 
-## 🌲 Overview
+## Overview
 
 Most outdoor applications encourage users to keep their eyes locked on screens—checking GPS waypoints, tweaking camera filters, or browsing social media feeds.
 
@@ -28,7 +28,7 @@ Players explore outdoor trails, woodlands, or local parks with minimal screen in
 
 ---
 
-## 📱 Android Installation
+## Android Installation
 
 Download and install the APK directly from GitHub Packages / Releases:
 
@@ -39,7 +39,7 @@ Download and install the APK directly from GitHub Packages / Releases:
 
 ---
 
-## ⚔️ The Naturalist Stat Matrix
+## The Naturalist Stat Matrix
 
 Physical flora and landscape elements map directly to your character's RPG attributes and equipment tiers:
 
@@ -53,7 +53,7 @@ Physical flora and landscape elements map directly to your character's RPG attri
 
 ---
 
-## 🎮 Key Features
+## Key Features
 
 - **Designed for Zero Screen Time:** 
   - Trail Mode features a single primary shutter button.
@@ -71,7 +71,7 @@ Physical flora and landscape elements map directly to your character's RPG attri
 
 ---
 
-## 🧠 Why Open Innovation Matters
+## Why Open Innovation Matters
 
 Trail exploration and deep backcountry routes often have spotty or nonexistent mobile reception. 
 
@@ -81,7 +81,7 @@ Trail exploration and deep backcountry routes often have spotty or nonexistent m
 
 ---
 
-## 🚀 Quickstart & Local Setup
+## Quickstart & Local Setup
 
 Because the application utilizes modern ES Modules and WebGPU via browser workers, it must be served over an HTTP connection rather than opened directly via `file://`.
 
@@ -115,7 +115,7 @@ http://localhost:8000
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 * **Runtime & AI Pipeline:** [Transformers.js v3](https://github.com/huggingface/transformers.js) (`@huggingface/transformers`)
 * **Model Backbone:** `onnx-community/mobilenetv4_conv_small.e2400_r224_in1k`
@@ -126,7 +126,7 @@ http://localhost:8000
 
 ---
 
-## 📜 License
+## License
 
 This project is open-source and available under the [MIT License](https://www.google.com/search?q=LICENSE).
 
