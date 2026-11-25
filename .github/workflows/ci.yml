@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run unit tests
+        run: node --test
+
+      - name: Verify index.html module script syntax
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const { execFileSync } = require("node:child_process");
+            const html = fs.readFileSync("index.html", "utf8");
+            const match = html.match(/<script type="module">([\s\S]*?)<\/script>/);
+            if (!match) throw new Error("Missing <script type=\"module\"> in index.html");
+            execFileSync(process.execPath, ["--input-type=module", "--check"], {
+              input: match[1],
+              stdio: ["pipe", "inherit", "inherit"],
+            });
+          '
+
+      - name: Verify sw.js and manifest.json syntax
+        run: |
+          node --check sw.js
+          node -e 'JSON.parse(require("node:fs").readFileSync("manifest.json", "utf8"))'

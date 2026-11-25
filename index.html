@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#0b1a12">
 <meta name="description" content="The Verdant Knight — an offline-first naturalist RPG. Touch grass, level up.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 26'%3E%3Crect width='24' height='26' rx='4' fill='%230b1a12'/%3E%3Cpath d='M8 4h8v4h1v8h-3v5h-4v-5H7V8h1V4z' fill='%233f7a4c'/%3E%3Cpath d='M11 4h2v10h4v2H7v-2h4V4z' fill='%23c9a227'/%3E%3C/svg%3E">
 <title>THE VERDANT KNIGHT: CHRONICLES OF THE REALM</title>
 <style>
 :root{
@@ -398,9 +400,45 @@ input[type=text]:focus{border-color:var(--gold);}
    THE VERDANT KNIGHT: CHRONICLES OF THE REALM
    Naturalist RPG powered by Transformers.js (WebGPU)
    ============================================================ */
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0';
+import {
+  SAVE_KEY,
+  ELEMENTS,
+  EL_KEYS,
+  TIER_REQ,
+  TIER_BONUS,
+  CLASSES,
+  SKINS,
+  HAIRS,
+  HAIRCOL,
+  PAINTS,
+  RARITY,
+  XP_NEXT,
+  QUESTS,
+  freshState,
+  loadSave as loadSavedState,
+  saveState,
+  clamp,
+  esc,
+  statOf as calcStatOf,
+  totalLevel as calcTotalLevel,
+  unlockedTier,
+  heroTitle as calcHeroTitle,
+  applyElementXP,
+  rollRarity,
+  makeSpecimen,
+  classifyPixelsFallback,
+  mapLabelToElement,
+  describeFindSource,
+} from './game-logic.js';
 
-env.allowLocalModels = false;
+/* ---------------- Service Worker Registration ---------------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
 
 /* ---------------- Open-Weight AI Vision Pipeline ---------------- */
 let aiClassifier = null;
@@ -409,6 +447,18 @@ let aiStatus = 'idle';
 async function initVisionAI() {
   if (aiClassifier || aiStatus === 'loading') return;
   aiStatus = 'loading';
+
+  let pipeline;
+  try {
+    const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0');
+    pipeline = mod.pipeline;
+    mod.env.allowLocalModels = false;
+  } catch (err) {
+    aiStatus = 'error';
+    console.warn('Transformers.js dynamic import failed (offline or blocked):', err);
+    return;
+  }
+
   try {
     aiClassifier = await pipeline(
       'image-classification',
@@ -428,156 +478,105 @@ async function initVisionAI() {
       toast('🧠 <b>Vision AI loaded via WASM!</b>');
     } catch (e) {
       aiStatus = 'error';
+      console.warn('Vision AI initialization failed:', e);
     }
   }
 }
 initVisionAI();
-
-/* ---------------- Data ---------------- */
-const ELEMENTS = {
-  bark:   { key:'bark',   name:'Bark & Timber',       stat:'DEF', icon:'🌳', color:'#b07a3e',
-            gear:['Bark Greaves','Ironwood Cuirass','Ancient Sylvan Plate'], gicon:['🥾','🪵','🛡'],
-            pre:['Gnarled','Ironbark','Mossback','Split-Oak','Emberwood','Whorled','Storm-Splintered','Elder'],
-            suf:['Oak Heart','Pine Splinter','Cedar Bark','Root Twist','Timber Knot','Birch Curl','Hollow Log','Acorn Cap'],
-            legend:'Heart of the Old Grove' },
-  leaf:   { key:'leaf',   name:'Foliage & Needles',   stat:'DEX', icon:'🍃', color:'#4caf50',
-            gear:['Leaf Wraps','Briar Hood','Wind-Runner Mantle'], gicon:['🍂','🌿','🧥'],
-            pre:['Whisper','Silver','Dancing','Serrated','Duskwoven','Fleet','Emerald','Sighing'],
-            suf:['Fern','Pine Needle','Ivy Coil','Maple Blade','Nettle Tuft','Clover Sprig','Reed Flute','Willow Wand'],
-            legend:'The Last Leaf of Autumn Eternal' },
-  stone:  { key:'stone',  name:'Stones & Minerals',   stat:'STR', icon:'🪨', color:'#9aa3ad',
-            gear:['Flint Dagger','Basalt Mace','Granite Greatsword'], gicon:['🔪','🔨','🗡'],
-            pre:['Veined','Thunder','River-Worn','Obsidian','Graven','Ironvein','Slumbering','Starfall'],
-            suf:['Flint Shard','Granite Chunk','Quartz Chip','Basalt Core','Pebble Rune','Slate Plate','Geode Heart','Menhir Chip'],
-            legend:'The Mountain’s First Tooth' },
-  bloom:  { key:'bloom',  name:'Flowers & Berries',   stat:'WIS', icon:'🌸', color:'#e06ba7',
-            gear:['Dandelion Charm','Amber Amulet','Bloom-Rune Circlet'], gicon:['🌼','📿','👑'],
-            pre:['Sunfire','Moonpetal','Wild','Crimson','Gilded','Dewkiss','Humming','Twilight'],
-            suf:['Dandelion','Berry Cluster','Foxglove','Thistle Bloom','Clover Crown','Rosehip','Bluebell','Poppy Tear'],
-            legend:'Bloom of the First Morning' },
-  fungus: { key:'fungus', name:'Fungi, Moss & Lichen',stat:'END', icon:'🍄', color:'#8fbf6f',
-            gear:['Lichen Sash','Mycelium Shield','Spore-Mother Aegis'], gicon:['🎗','🛡','⚜'],
-            pre:['Pale','Lantern','Velvet','Ancient','Speckled','Whispercap','Deepwood','Patient'],
-            suf:['Morel','Shelf Fungus','Lichen Rosette','Moss Ball','Puffball','Chanterelle','Turkey Tail','Ink Cap'],
-            legend:'The Spore-Mother’s Own Heart' },
-};
-const EL_KEYS = Object.keys(ELEMENTS);
-const TIER_REQ = [2,4,7];
-const TIER_BONUS = [4,8,12];
-const CLASSES = {
-  oak:    { key:'oak',    name:'Oak Sentinel',  el:'bark',   item:'Bark Shield',    color:'#8a5a2b',
-            desc:'Rooted and unbowed. The forest’s wall. +15 DEF, starts with the Bark Shield.' },
-  wind:   { key:'wind',   name:'Wind Strider',  el:'leaf',   item:'Leaf Cloak',     color:'#4caf50',
-            desc:'Quick as a falling leaf, gone before it lands. +15 DEX, starts with the Leaf Cloak.' },
-  earth:  { key:'earth',  name:'Earth Breaker', el:'stone',  item:'Stone Gauntlet', color:'#9aa3ad',
-            desc:'Speaks softly, carries a mountain. +15 STR, starts with the Stone Gauntlet.' },
-  wild:   { key:'wild',   name:'Wild Mystic',   el:'bloom',  item:'Seed Talisman',  color:'#e06ba7',
-            desc:'Reads omens in petals and berries. +15 WIS, starts with the Seed Talisman.' },
-  marrow: { key:'marrow', name:'Marrow Ward',   el:'fungus', item:'Spore Belt',     color:'#8fbf6f',
-            desc:'Endures what would fell an oak. +15 END, starts with the Spore Belt.' },
-};
-const SKINS  = ['#f6d7b8','#eab98c','#c98d5f','#9c6b43','#6f4a2f','#4a3121'];
-const HAIRS  = ['Braids','Wild Shag','Ponytail','Shorn'];
-const HAIRCOL= ['#241f1c','#5a3a1e','#8c5a2b','#b8860b','#a63d2a','#c9c9c9'];
-const PAINTS = ['None','Mud Smear','Leaf Runic','Ash'];
-const RARITY = [
-  {key:'common',    name:'Common',    w:70, mult:1},
-  {key:'uncommon',  name:'Uncommon',  w:20, mult:1.5},
-  {key:'rare',      name:'Rare',      w:8,  mult:2.5},
-  {key:'legendary', name:'Legendary', w:2,  mult:5},
-];
-const XP_NEXT = lv => lv * 100;
-
-const QUESTS = [
-  { id:'q_first',  name:'First Steps on the Trail', desc:'Log your first specimen.', target:1,
-    prog:s=>Math.min(s.stats.finds,1), reward:{points:2}, rtext:'+2 stat points' },
-  { id:'q_five',   name:'Handful of the Wild',      desc:'Log 5 specimens.', target:5,
-    prog:s=>Math.min(s.stats.finds,5), reward:{points:2}, rtext:'+2 stat points' },
-  { id:'q_ten',    name:'Seasoned Forager',         desc:'Log 10 specimens.', target:10,
-    prog:s=>Math.min(s.stats.finds,10), reward:{points:3}, rtext:'+3 stat points' },
-  { id:'q_all5',   name:'Five-Fold Attunement',     desc:'Log at least one specimen of each element.', target:5,
-    prog:s=>EL_KEYS.filter(k=>s.finds.some(f=>f.el===k)).length, reward:{points:3}, rtext:'+3 stat points' },
-  { id:'q_rare',   name:'Omen in the Undergrowth',  desc:'Find a Rare (or better) specimen.', target:1,
-    prog:s=>Math.min(s.finds.filter(f=>f.rarity==='rare'||f.rarity==='legendary').length,1), reward:{points:2}, rtext:'+2 stat points' },
-  { id:'q_shutter',name:'Eye of the Naturalist',    desc:'Log 5 specimens with the camera.', target:5,
-    prog:s=>Math.min(s.stats.camFinds,5), reward:{points:2}, rtext:'+2 stat points' },
-  { id:'q_shutter10', name:'Master Lens',           desc:'Log 10 specimens with the camera.', target:10,
-    prog:s=>Math.min(s.stats.camFinds,10), reward:{points:3}, rtext:'+3 stat points' },
-  { id:'q_apex',   name:'Apex Attunement',          desc:'Reach element level 7 (Tier III gear) in any element.', target:7,
-    prog:s=>Math.max(...EL_KEYS.map(k=>s.elements[k].level)), reward:{points:3}, rtext:'+3 stat points' },
-];
+window.addEventListener('online', () => {
+  if (!aiClassifier && aiStatus === 'error') initVisionAI();
+});
 
 /* ---------------- State & Persistence ---------------- */
-const SAVE_KEY = 'verdantKnightSave_v1';
 let S = null;
 let draft = null;
 
-function freshState(d){
-  const els = {}; const alloc = {}; const eq = {};
-  EL_KEYS.forEach(k=>{ els[k]={xp:0,level:1}; alloc[k]=0; eq[k]=0; });
-  return {
-    v:1, name:d.name, pronouns:d.pronouns, cls:d.cls,
-    avatar:{ skin:d.skin, hair:d.hair, hairColor:d.hairColor, paint:d.paint },
-    elements:els, alloc:alloc, points:0,
-    equipped:eq, finds:[], questsClaimed:[],
-    muted:false, seenUnlocks:[],
-    stats:{ finds:0, camFinds:0, forages:0 },
-  };
+function handleSaveNotice(notice) {
+  if (notice.type === 'pruned') {
+    toast(
+      `⚠ Storage full — pruned ${notice.pruned} oldest photo thumbnail${notice.pruned === 1 ? '' : 's'} to keep saving.`
+    );
+  } else if (notice.type === 'quota-full') {
+    toast('⚠ Browser storage is full — unable to save new progress.');
+  } else {
+    toast('⚠ Could not save chronicle to local storage.');
+  }
 }
-function save(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(S)); }catch(e){} }
-function loadSave(){ try{ const r=localStorage.getItem(SAVE_KEY); return r?JSON.parse(r):null; }catch(e){ return null; } }
+
+function save() {
+  if (!S) return;
+  saveState(S, localStorage, handleSaveNotice);
+}
+
+function loadSave() {
+  return loadSavedState(localStorage);
+}
 
 /* ---------------- Helpers ---------------- */
-const $ = id => document.getElementById(id);
-const rnd = (a,b) => a + Math.random()*(b-a);
-const ri  = (a,b) => Math.floor(rnd(a,b+1));
-const pick = arr => arr[Math.floor(Math.random()*arr.length)];
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const esc = s => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = (id) => document.getElementById(id);
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-function toast(msg){
-  const t=document.createElement('div'); t.className='toast'; t.innerHTML=msg;
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = msg;
   $('toastWrap').appendChild(t);
-  setTimeout(()=>t.remove(), 4000);
+  setTimeout(() => t.remove(), 4000);
 }
 
 /* ---------------- Audio Engine ---------------- */
-let AC=null;
-function ac(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return AC; }
-function beep(freq=440,dur=.09,type='square',vol=.12,when=0){
-  if(S&&S.muted) return; const a=ac(); if(!a) return;
-  const o=a.createOscillator(), g=a.createGain();
-  o.type=type; o.frequency.value=freq;
-  g.gain.setValueAtTime(vol, a.currentTime+when);
-  g.gain.exponentialRampToValueAtTime(.001, a.currentTime+when+dur);
-  o.connect(g); g.connect(a.destination);
-  o.start(a.currentTime+when); o.stop(a.currentTime+when+dur+.02);
+let AC = null;
+function ac() {
+  if (!AC) {
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {}
+  }
+  return AC;
+}
+function beep(freq = 440, dur = 0.09, type = 'square', vol = 0.12, when = 0) {
+  if (S && S.muted) return;
+  const a = ac();
+  if (!a) return;
+  const o = a.createOscillator();
+  const g = a.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, a.currentTime + when);
+  g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + when + dur);
+  o.connect(g);
+  g.connect(a.destination);
+  o.start(a.currentTime + when);
+  o.stop(a.currentTime + when + dur + 0.02);
 }
 const sfx = {
-  click: ()=>beep(520,.06,'square',.08),
-  find:  ()=>{ beep(392,.08,'triangle',.12); beep(523,.1,'triangle',.12,.09); beep(659,.14,'triangle',.12,.18); },
-  rare:  ()=>{ [523,659,784,1046].forEach((f,i)=>beep(f,.12,'triangle',.13,i*.09)); },
-  level: ()=>{ [440,554,659,880,1108].forEach((f,i)=>beep(f,.12,'square',.1,i*.08)); },
-  win:   ()=>{ [523,659,784,1046,1318].forEach((f,i)=>beep(f,.14,'triangle',.12,i*.1)); },
+  click: () => beep(520, 0.06, 'square', 0.08),
+  find: () => {
+    beep(392, 0.08, 'triangle', 0.12);
+    beep(523, 0.1, 'triangle', 0.12, 0.09);
+    beep(659, 0.14, 'triangle', 0.12, 0.18);
+  },
+  rare: () => {
+    [523, 659, 784, 1046].forEach((f, i) => beep(f, 0.12, 'triangle', 0.13, i * 0.09));
+  },
+  level: () => {
+    [440, 554, 659, 880, 1108].forEach((f, i) => beep(f, 0.12, 'square', 0.1, i * 0.08));
+  },
+  win: () => {
+    [523, 659, 784, 1046, 1318].forEach((f, i) => beep(f, 0.14, 'triangle', 0.12, i * 0.1));
+  },
 };
 
 /* ---------------- Stat Calculation ---------------- */
-function statOf(elKey){
-  let v = 10 + (S.elements[elKey].level-1)*3 + S.alloc[elKey];
-  if(CLASSES[S.cls].el===elKey) v += 15;
-  v += TIER_BONUS[S.equipped[elKey]-1]||0;
-  return v;
+function statOf(elKey) {
+  return calcStatOf(S, elKey);
 }
-function totalLevel(){ return EL_KEYS.reduce((a,k)=>a+S.elements[k].level,0); }
-function unlockedTier(lv){ return lv>=TIER_REQ[2]?3 : lv>=TIER_REQ[1]?2 : lv>=TIER_REQ[0]?1 : 0; }
-function heroTitle(){
-  const tl=totalLevel();
-  if(tl>=40) return 'Verdant Knight-Lord of the Realm';
-  if(tl>=30) return 'Elder Warden of the Wilds';
-  if(tl>=22) return 'Ranger of the Deep Green';
-  if(tl>=15) return 'Sworn Blade of the Grove';
-  if(tl>=10) return 'Trailworn Adventurer';
-  return 'Greenhorn of the Glade';
+function totalLevel() {
+  return calcTotalLevel(S);
+}
+function heroTitle() {
+  return calcHeroTitle(S);
 }
 
 /* ---------------- Paper-doll Avatar Rendering ---------------- */
@@ -649,52 +648,83 @@ function drawAvatar(cv, av, opts={}){
 }
 
 /* ---------------- Particle System ---------------- */
-const fxCv=$('fx'), fxCtx=fxCv.getContext('2d');
-let fxParts=[];
-function fxResize(){ fxCv.width=innerWidth; fxCv.height=innerHeight; }
-addEventListener('resize', fxResize); fxResize();
-function burst(x,y,colors,n=40,spread=6){
-  for(let i=0;i<n;i++){
-    const a=rnd(0,Math.PI*2), sp=rnd(1,spread);
-    fxParts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-2,life:rnd(30,70),max:70,c:pick(colors),s:rnd(2,5)});
+const fxCv = $('fx');
+const fxCtx = fxCv.getContext('2d');
+let fxParts = [];
+function fxResize() {
+  fxCv.width = innerWidth;
+  fxCv.height = innerHeight;
+}
+addEventListener('resize', fxResize);
+fxResize();
+
+function burst(x, y, colors, n = 40, spread = 6) {
+  for (let i = 0; i < n; i++) {
+    const a = rnd(0, Math.PI * 2);
+    const sp = rnd(1, spread);
+    fxParts.push({
+      x,
+      y,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp - 2,
+      life: rnd(30, 70),
+      max: 70,
+      c: pick(colors),
+      s: rnd(2, 5),
+    });
   }
 }
-(function fxLoop(){
-  fxCtx.clearRect(0,0,fxCv.width,fxCv.height);
-  fxParts=fxParts.filter(p=>p.life>0);
-  for(const p of fxParts){
-    p.x+=p.vx; p.y+=p.vy; p.vy+=.12; p.life--;
-    fxCtx.globalAlpha=Math.max(0,p.life/p.max);
-    fxCtx.fillStyle=p.c; fxCtx.fillRect(p.x,p.y,p.s,p.s);
+(function fxLoop() {
+  fxCtx.clearRect(0, 0, fxCv.width, fxCv.height);
+  fxParts = fxParts.filter((p) => p.life > 0);
+  for (const p of fxParts) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.12;
+    p.life--;
+    fxCtx.globalAlpha = Math.max(0, p.life / p.max);
+    fxCtx.fillStyle = p.c;
+    fxCtx.fillRect(p.x, p.y, p.s, p.s);
   }
-  fxCtx.globalAlpha=1;
+  fxCtx.globalAlpha = 1;
   requestAnimationFrame(fxLoop);
 })();
-function burstAtEl(el,colors,n=40){ const r=el.getBoundingClientRect(); burst(r.left+r.width/2, r.top+r.height/2, colors, n); }
+function burstAtEl(el, colors, n = 40) {
+  const r = el.getBoundingClientRect();
+  burst(r.left + r.width / 2, r.top + r.height / 2, colors, n);
+}
 
 /* ---------------- Screen Navigation ---------------- */
-function show(id){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
+function show(id) {
+  document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
   $(id).classList.remove('hidden');
-  window.scrollTo(0,0);
+  window.scrollTo(0, 0);
 }
-let curTab='trail';
-function showTab(t){
-  curTab=t;
-  document.querySelectorAll('#tabnav button').forEach(b=>b.classList.toggle('sel', b.dataset.tab===t));
-  document.querySelectorAll('.tab-page').forEach(p=>p.classList.add('hidden'));
-  $('tab-'+t).classList.remove('hidden');
+function showTab(t) {
+  document.querySelectorAll('#tabnav button').forEach((b) => b.classList.toggle('sel', b.dataset.tab === t));
+  document.querySelectorAll('.tab-page').forEach((p) => p.classList.add('hidden'));
+  $('tab-' + t).classList.remove('hidden');
   renderTab(t);
 }
-document.querySelectorAll('#tabnav button').forEach(b=>b.addEventListener('click',()=>{ sfx.click(); showTab(b.dataset.tab); }));
+document.querySelectorAll('#tabnav button').forEach((b) => {
+  b.addEventListener('click', () => {
+    sfx.click();
+    showTab(b.dataset.tab);
+  });
+});
 
 /* ---------------- Title Leaves ---------------- */
-(function(){
-  const wrap=$('titleLeaves'); const glyphs=['🍃','🍂','🌿','✦'];
-  for(let i=0;i<14;i++){
-    const l=document.createElement('span'); l.className='leaf'; l.textContent=pick(glyphs);
-    l.style.left=rnd(0,100)+'vw'; l.style.animationDuration=rnd(6,14)+'s';
-    l.style.animationDelay=-rnd(0,14)+'s'; l.style.fontSize=rnd(12,24)+'px';
+(function () {
+  const wrap = $('titleLeaves');
+  const glyphs = ['🍃', '🍂', '🌿', '✦'];
+  for (let i = 0; i < 14; i++) {
+    const l = document.createElement('span');
+    l.className = 'leaf';
+    l.textContent = pick(glyphs);
+    l.style.left = rnd(0, 100) + 'vw';
+    l.style.animationDuration = rnd(6, 14) + 's';
+    l.style.animationDelay = -rnd(0, 14) + 's';
+    l.style.fontSize = rnd(12, 24) + 'px';
     wrap.appendChild(l);
   }
 })();
@@ -718,65 +748,118 @@ function initCreate(){
     p.onclick=()=>{ draft.pronouns=p.dataset.p; sfx.click();
       $('pronounRow').querySelectorAll('.pill').forEach(x=>x.classList.toggle('sel',x===p)); };
   });
-  buildSwatches($('skinRow'), SKINS, (c,i)=>{draft.skin=c; refreshDraftAvatar();}, SKINS.indexOf(draft.skin), c=>`background:${c}`);
-  buildSwatches($('hairRow'), HAIRS, (c,i)=>{draft.hair=i; refreshDraftAvatar();}, draft.hair, null, true);
-  buildSwatches($('hairColorRow'), HAIRCOL, (c,i)=>{draft.hairColor=c; refreshDraftAvatar();}, HAIRCOL.indexOf(draft.hairColor), c=>`background:${c}`);
-  buildSwatches($('paintRow'), PAINTS, (c,i)=>{draft.paint=i; refreshDraftAvatar();}, draft.paint, null, true);$('inpName').value = draft.name;
+  buildSwatches($('skinRow'), SKINS, (c) => { draft.skin = c; refreshDraftAvatar(); }, SKINS.indexOf(draft.skin), (c) => `background:${c}`);
+  buildSwatches($('hairRow'), HAIRS, (c, i) => { draft.hair = i; refreshDraftAvatar(); }, draft.hair, null, true);
+  buildSwatches($('hairColorRow'), HAIRCOL, (c) => { draft.hairColor = c; refreshDraftAvatar(); }, HAIRCOL.indexOf(draft.hairColor), (c) => `background:${c}`);
+  buildSwatches($('paintRow'), PAINTS, (c, i) => { draft.paint = i; refreshDraftAvatar(); }, draft.paint, null, true);
+  $('inpName').value = draft.name;
   refreshDraftAvatar();
 }
-function buildSwatches(row, items, cb, selIdx, styleFn, isText){
-  row.innerHTML='';
-  items.forEach((it,i)=>{
-    const b=document.createElement('button'); b.className='sw'+(isText?' txt':'')+(i===selIdx?' sel':'');
-    if(isText) b.textContent=it; else b.setAttribute('style', styleFn(it));
-    b.addEventListener('click',()=>{ sfx.click(); row.querySelectorAll('.sw').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); cb(it,i); });
+function buildSwatches(row, items, cb, selIdx, styleFn, isText) {
+  row.innerHTML = '';
+  items.forEach((it, i) => {
+    const b = document.createElement('button');
+    b.className = 'sw' + (isText ? ' txt' : '') + (i === selIdx ? ' sel' : '');
+    if (isText) b.textContent = it;
+    else b.setAttribute('style', styleFn(it));
+    b.addEventListener('click', () => {
+      sfx.click();
+      row.querySelectorAll('.sw').forEach((x) => x.classList.remove('sel'));
+      b.classList.add('sel');
+      cb(it, i);
+    });
     row.appendChild(b);
   });
 }
-function refreshDraftAvatar(){
-  drawAvatar($('createAvatar'), draft, { equipped:{bark:0,leaf:0,stone:0,bloom:0,fungus:0}, clsColor:CLASSES[draft.cls].color });
+function refreshDraftAvatar() {
+  drawAvatar($('createAvatar'), draft, { equipped: { bark: 0, leaf: 0, stone: 0, bloom: 0, fungus: 0 }, clsColor: CLASSES[draft.cls].color });
 }
-$('inpName').addEventListener('input', e=>{ draft.name=e.target.value; });
+$('inpName').addEventListener('input', (e) => {
+  draft.name = e.target.value;
+});
 
-$('btnBegin').addEventListener('click', ()=>{
-  const name=(draft.name||'').trim();
-  if(!name){ toast('⚠ The trees demand a name. Enter one.'); $('inpName').focus(); return; }
-  S=freshState({...draft, name});
-  save(); sfx.win();
-  show('scr-game'); enterGame();
+$('btnBegin').addEventListener('click', () => {
+  const name = (draft.name || '').trim();
+  if (!name) {
+    toast('⚠ The trees demand a name. Enter one.');
+    $('inpName').focus();
+    return;
+  }
+  S = freshState({ ...draft, name });
+  save();
+  sfx.win();
+  show('scr-game');
+  enterGame();
   toast(`🌿 Welcome to the Realm, <b>${esc(S.name)}</b> the ${CLASSES[S.cls].name}!`);
-  setTimeout(()=>toast(`🎁 Starting relic: <b>${CLASSES[S.cls].item}</b>`), 900);
+  setTimeout(() => toast(`🎁 Starting relic: <b>${CLASSES[S.cls].item}</b>`), 900);
 });
 
-$('btnBackTitle').addEventListener('click', ()=>{ sfx.click(); show('scr-title'); syncTitleButtons(); });
-
-function syncTitleButtons(){ $('btnContinue').disabled = !loadSave(); }$('btnNew').addEventListener('click', ()=>{
+$('btnBackTitle').addEventListener('click', () => {
   sfx.click();
-  if(loadSave() && !confirm('A chronicle already exists. Begin anew and overwrite it?')) return;
-  initCreate(); show('scr-create');
+  show('scr-title');
+  syncTitleButtons();
 });
-$('btnContinue').addEventListener('click', ()=>{
-  const s=loadSave(); if(!s) return;
-  S=s; sfx.click(); show('scr-game'); enterGame();
+
+function syncTitleButtons() {
+  $('btnContinue').disabled = !loadSave();
+}
+
+$('btnNew').addEventListener('click', () => {
+  sfx.click();
+  if (loadSave() && !confirm('A chronicle already exists. Begin anew and overwrite it?')) return;
+  initCreate();
+  show('scr-create');
+});
+
+$('btnContinue').addEventListener('click', () => {
+  const s = loadSave();
+  if (!s) return;
+  S = s;
+  sfx.click();
+  show('scr-game');
+  enterGame();
 });
 
 /* ---------------- Render Views ---------------- */
-function enterGame(){ renderHeader(); showTab('trail'); renderAll(); }
-function renderAll(){ renderHeader(); renderElBars(); renderHero(); renderGear(); renderCodex(); renderQuests(); }
-function renderTab(t){
-  ({trail:()=>{renderElBars();}, hero:renderHero, gear:renderGear, codex:renderCodex, quests:renderQuests}[t]||(()=>{}))();
+function enterGame() {
+  renderHeader();
+  showTab('trail');
+  renderAll();
 }
-function avatarOpts(){ return { equipped:S.equipped, clsColor:CLASSES[S.cls].color }; }
-function renderHeader(){
-  $('headName').textContent=S.name;
-  $('headClass').textContent=`${CLASSES[S.cls].name} · ${S.pronouns}`;
-  $('headLevel').textContent=`${heroTitle()} · Realm Lv ${totalLevel()}`;
-  $('btnMute').textContent=S.muted?'🔇':'🔊';
+function renderAll() {
+  renderHeader();
+  renderElBars();
+  renderHero();
+  renderGear();
+  renderCodex();
+  renderQuests();
+}
+function renderTab(t) {
+  ({ trail: () => renderElBars(), hero: renderHero, gear: renderGear, codex: renderCodex, quests: renderQuests }[t] || (() => {}))();
+}
+function avatarOpts() {
+  return { equipped: S.equipped, clsColor: CLASSES[S.cls].color };
+}
+function renderHeader() {
+  $('headName').textContent = S.name;
+  $('headClass').textContent = `${CLASSES[S.cls].name} · ${S.pronouns}`;
+  $('headLevel').textContent = `${heroTitle()} · Realm Lv ${totalLevel()}`;
+  $('btnMute').textContent = S.muted ? '🔇' : '🔊';
   drawAvatar($('headAvatar'), S.avatar, avatarOpts());
 }
-$('btnMute').addEventListener('click', ()=>{ S.muted=!S.muted; save(); renderHeader(); if(!S.muted) sfx.click(); });$('btnReset').addEventListener('click', ()=>{
-  if(!confirm('Burn this chronicle and return to the title? This cannot be undone.')) return;
-  localStorage.removeItem(SAVE_KEY); S=null; location.reload();
+
+$('btnMute').addEventListener('click', () => {
+  S.muted = !S.muted;
+  save();
+  renderHeader();
+  if (!S.muted) sfx.click();
+});
+
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Burn this chronicle and return to the title? This cannot be undone.')) return;
+  localStorage.removeItem(SAVE_KEY);
+  S = null;
+  location.reload();
 });
 
 function renderElBars(){
@@ -794,123 +877,174 @@ function renderElBars(){
   });
 }
 
-function renderHero(){
-  $('heroName').textContent=S.name;
-  $('heroTitle').textContent=heroTitle();
-  const c=CLASSES[S.cls];
-  $('heroMeta').innerHTML=`${c.name} · ${S.pronouns} · Relic: <b style="color:var(--gold-hi)">${c.item}</b><br>`+
+function renderHero() {
+  $('heroName').textContent = S.name;
+  $('heroTitle').textContent = heroTitle();
+  const c = CLASSES[S.cls];
+  $('heroMeta').innerHTML =
+    `${c.name} · ${esc(S.pronouns)} · Relic: <b style="color:var(--gold-hi)">${c.item}</b><br>` +
     `Specimens: ${S.stats.finds} · Realm Lv ${totalLevel()}`;
-  drawAvatar($('heroAvatar'), S.avatar, avatarOpts());$('allocBadge').textContent=S.points>0?`(${S.points})`:'';
-  $('btnAlloc').disabled=S.points<=0;
+  drawAvatar($('heroAvatar'), S.avatar, avatarOpts());
+  $('allocBadge').textContent = S.points > 0 ? `(${S.points})` : '';
+  $('btnAlloc').disabled = S.points <= 0;
 
-  const g=$('statGrid'); g.innerHTML='';
-  EL_KEYS.forEach(k=>{
-    const e=ELEMENTS[k], st=S.elements[k];
-    const row=document.createElement('div'); row.className='stat-row';
-    row.innerHTML=`<div class="ic" style="width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:${e.color}22;border:2px solid ${e.color}66">${e.icon}</div>
-      <div><b style="color:${e.color}">${e.stat}</b> <span class="sub">· ${e.name} · Lv ${st.level}${CLASSES[S.cls].el===k?' · <span style="color:var(--gold-hi)">class +15</span>':''}</span></div>
-      <div class="v">${statOf(k)}</div>`;
+  const g = $('statGrid');
+  g.innerHTML = '';
+  EL_KEYS.forEach((k) => {
+    const e = ELEMENTS[k];
+    const st = S.elements[k];
+    const row = document.createElement('div');
+    row.className = 'stat-row';
+    row.innerHTML =
+      `<div class="ic" style="width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:${e.color}22;border:2px solid ${e.color}66">${e.icon}</div>` +
+      `<div><b style="color:${e.color}">${e.stat}</b> <span class="sub">· ${e.name} · Lv ${st.level}${CLASSES[S.cls].el === k ? ' · <span style="color:var(--gold-hi)">class +15</span>' : ''}</span></div>` +
+      `<div class="v">${statOf(k)}</div>`;
     g.appendChild(row);
   });
 
-  const deeds=[];
-  if(S.stats.finds>0) deeds.push(`🌿 First specimen logged — the Realm noticed.`);
-  if(S.stats.finds>=10) deeds.push(`📖 ${S.stats.finds} specimens chronicled.`);
-  if(S.equipped && EL_KEYS.some(k=>S.equipped[k]>=3)) deeds.push(`👑 Bearer of Tier III relic-gear.`);
-  if(totalLevel()>=25) deeds.push(`🌲 The Old Grove whispers your name.`);
-  $('deedList').innerHTML = deeds.length? deeds.map(d=>`<div>${d}</div>`).join('') : '<div>No deeds yet. The trail awaits.</div>';
+  const deeds = [];
+  if (S.stats.finds > 0) deeds.push('🌿 First specimen logged — the Realm noticed.');
+  if (S.stats.finds >= 10) deeds.push(`📖 ${S.stats.finds} specimens chronicled.`);
+  if (S.equipped && EL_KEYS.some((k) => S.equipped[k] >= 3)) deeds.push('👑 Bearer of Tier III relic-gear.');
+  if (totalLevel() >= 25) deeds.push('🌲 The Old Grove whispers your name.');
+  $('deedList').innerHTML = deeds.length
+    ? deeds.map((d) => `<div>${d}</div>`).join('')
+    : '<div>No deeds yet. The trail awaits.</div>';
 }
-$('btnAlloc').addEventListener('click', ()=>{ if(S.points>0) openAllocModal(); });
+$('btnAlloc').addEventListener('click', () => {
+  if (S.points > 0) openAllocModal();
+});
 
-let allocTmp=null;
-function openAllocModal(){
-  allocTmp={ pts:S.points, add:{bark:0,leaf:0,stone:0,bloom:0,fungus:0} };
-  renderAllocModal(); openModal();
+let allocTmp = null;
+function openAllocModal() {
+  allocTmp = { pts: S.points, add: { bark: 0, leaf: 0, stone: 0, bloom: 0, fungus: 0 } };
+  renderAllocModal();
+  openModal();
 }
-function renderAllocModal(){
-  const box=$('modalBox');
-  let rows=EL_KEYS.map(k=>{
-    const e=ELEMENTS[k];
+function renderAllocModal() {
+  const box = $('modalBox');
+  const rows = EL_KEYS.map((k) => {
+    const e = ELEMENTS[k];
     return `<div class="stat-row">
       <div style="width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:${e.color}22;border:2px solid ${e.color}66">${e.icon}</div>
-      <div><b style="color:${e.color}">${e.stat}</b> <span class="sub">now ${statOf(k)+allocTmp.add[k]}${allocTmp.add[k]?` <span style="color:var(--green-hi)">(+${allocTmp.add[k]})</span>`:''}</span></div>
-      <div class="alloc-btns"><button data-k="${k}" data-d="-1" ${allocTmp.add[k]<=0?'disabled':''}>−</button><button data-k="${k}" data-d="1" ${allocTmp.pts<=0?'disabled':''}>+</button></div>
+      <div><b style="color:${e.color}">${e.stat}</b> <span class="sub">now ${statOf(k) + allocTmp.add[k]}${allocTmp.add[k] ? ` <span style="color:var(--green-hi)">(+${allocTmp.add[k]})</span>` : ''}</span></div>
+      <div class="alloc-btns"><button data-k="${k}" data-d="-1" ${allocTmp.add[k] <= 0 ? 'disabled' : ''}>−</button><button data-k="${k}" data-d="1" ${allocTmp.pts <= 0 ? 'disabled' : ''}>+</button></div>
     </div>`;
   }).join('');
-  box.innerHTML=`<h2 class="rune-title" style="font-size:1.1rem;">✦ LEVEL UP — Allocate Points</h2>
-    <p style="color:var(--ink-dim);font-size:.78rem;margin:8px 0 12px;">The Realm grants you <b style="color:var(--gold-hi)">${allocTmp.pts}</b> point${allocTmp.pts===1?'':'s'}. Spend them among the five elements.</p>
+  box.innerHTML = `<h2 class="rune-title" style="font-size:1.1rem;">✦ LEVEL UP — Allocate Points</h2>
+    <p style="color:var(--ink-dim);font-size:.78rem;margin:8px 0 12px;">The Realm grants you <b style="color:var(--gold-hi)">${allocTmp.pts}</b> point${allocTmp.pts === 1 ? '' : 's'}. Spend them among the five elements.</p>
     <div class="stat-grid">${rows}</div>
     <button class="btn green block" id="btnAllocDone" style="margin-top:14px;">Confirm</button>`;
-  box.querySelectorAll('.alloc-btns button').forEach(b=>{
-    b.addEventListener('click',()=>{
-      const k=b.dataset.k, d=+b.dataset.d;
-      if(d>0 && allocTmp.pts>0){ allocTmp.add[k]++; allocTmp.pts--; }
-      if(d<0 && allocTmp.add[k]>0){ allocTmp.add[k]--; allocTmp.pts++; }
-      sfx.click(); renderAllocModal();
+  box.querySelectorAll('.alloc-btns button').forEach((b) => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.k;
+      const d = +b.dataset.d;
+      if (d > 0 && allocTmp.pts > 0) {
+        allocTmp.add[k]++;
+        allocTmp.pts--;
+      }
+      if (d < 0 && allocTmp.add[k] > 0) {
+        allocTmp.add[k]--;
+        allocTmp.pts++;
+      }
+      sfx.click();
+      renderAllocModal();
     });
   });
-  $('btnAllocDone').addEventListener('click', ()=>{
-    EL_KEYS.forEach(k=>{ S.alloc[k]+=allocTmp.add[k]; });
-    S.points=allocTmp.pts;
-    save(); closeModal(); sfx.level(); renderAll();
+  $('btnAllocDone').addEventListener('click', () => {
+    EL_KEYS.forEach((k) => {
+      S.alloc[k] += allocTmp.add[k];
+    });
+    S.points = allocTmp.pts;
+    save();
+    closeModal();
+    sfx.level();
+    renderAll();
   });
 }
 
-function renderGear(){
-  const wrap=$('gearList'); wrap.innerHTML='';
-  EL_KEYS.forEach(k=>{
-    const e=ELEMENTS[k], st=S.elements[k], maxT=unlockedTier(st.level);
-    const row=document.createElement('div'); row.className='gear-row';
-    row.innerHTML=`<h4><span style="color:${e.color}">${e.icon} ${e.name} <span style="color:var(--ink-dim);font-size:.7rem;">· ${e.stat}</span></span><span style="color:var(--ink-dim);font-size:.7rem;">Lv ${st.level}</span></h4>`;
-    const tg=document.createElement('div'); tg.className='tier-grid';
-    for(let t=1;t<=3;t++){
-      const un=maxT>=t, eqd=S.equipped[k]===t;
-      const d=document.createElement('button');
-      d.className='tier'+(un?' unlocked':'')+(eqd?' equipped':'');
-      d.innerHTML=`<span class="gi">${e.gicon[t-1]}</span><span>${e.gear[t-1]}</span>
-        ${un?`<span style="color:var(--gold-hi);font-size:.62rem;">+${TIER_BONUS[t-1]} ${e.stat}${eqd?' · WORN':''}</span>`:`<span class="lock">🔒 Lv ${TIER_REQ[t-1]}</span>`}`;
-      if(un) d.addEventListener('click', ()=>{
-        S.equipped[k]=(S.equipped[k]===t)?0:t;
-        sfx.click(); save(); renderGear(); renderHeader(); renderHero();
-        burstAtEl(d,[e.color,'#f2d060'],18);
-      });
+function renderGear() {
+  const wrap = $('gearList');
+  wrap.innerHTML = '';
+  EL_KEYS.forEach((k) => {
+    const e = ELEMENTS[k];
+    const st = S.elements[k];
+    const maxT = unlockedTier(st.level);
+    const row = document.createElement('div');
+    row.className = 'gear-row';
+    row.innerHTML = `<h4><span style="color:${e.color}">${e.icon} ${e.name} <span style="color:var(--ink-dim);font-size:.7rem;">· ${e.stat}</span></span><span style="color:var(--ink-dim);font-size:.7rem;">Lv ${st.level}</span></h4>`;
+    const tg = document.createElement('div');
+    tg.className = 'tier-grid';
+    for (let t = 1; t <= 3; t++) {
+      const un = maxT >= t;
+      const eqd = S.equipped[k] === t;
+      const d = document.createElement('button');
+      d.className = 'tier' + (un ? ' unlocked' : '') + (eqd ? ' equipped' : '');
+      d.innerHTML = `<span class="gi">${e.gicon[t - 1]}</span><span>${e.gear[t - 1]}</span>
+        ${un ? `<span style="color:var(--gold-hi);font-size:.62rem;">+${TIER_BONUS[t - 1]} ${e.stat}${eqd ? ' · WORN' : ''}</span>` : `<span class="lock">🔒 Lv ${TIER_REQ[t - 1]}</span>`}`;
+      if (un) {
+        d.addEventListener('click', () => {
+          S.equipped[k] = S.equipped[k] === t ? 0 : t;
+          sfx.click();
+          save();
+          renderGear();
+          renderHeader();
+          renderHero();
+          burstAtEl(d, [e.color, '#f2d060'], 18);
+        });
+      }
       tg.appendChild(d);
     }
-    row.appendChild(tg); wrap.appendChild(row);
+    row.appendChild(tg);
+    wrap.appendChild(row);
   });
 }
 
-function renderCodex(){
-  const g=$('codexGrid'); g.innerHTML='';$('codexEmpty').style.display = S.finds.length? 'none':'block';
-  $('codexCount').textContent = `${S.finds.length} specimen${S.finds.length===1?'':'s'} chronicled · ${S.stats.camFinds} by lens, ${S.stats.forages} by hand`;
-  [...S.finds].reverse().forEach(f=>{
-    const e=ELEMENTS[f.el];
-    const c=document.createElement('div'); c.className='codex-card rar-'+f.rarity;
-    c.innerHTML=`${f.thumb?`<img src="${f.thumb}" alt="">`:`<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:2rem;background:${e.color}18">${e.icon}</div>`}
+function renderCodex() {
+  const g = $('codexGrid');
+  g.innerHTML = '';
+  $('codexEmpty').style.display = S.finds.length ? 'none' : 'block';
+  $('codexCount').textContent = `${S.finds.length} specimen${S.finds.length === 1 ? '' : 's'} chronicled · ${S.stats.camFinds} by lens, ${S.stats.forages} by hand`;
+  [...S.finds].reverse().forEach((f) => {
+    const e = ELEMENTS[f.el];
+    const c = document.createElement('div');
+    c.className = 'codex-card rar-' + f.rarity;
+    c.innerHTML = `${f.thumb ? `<img src="${esc(f.thumb)}" alt="">` : `<div style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:2rem;background:${e.color}18">${e.icon}</div>`}
       <div class="cc-body"><div class="cc-name">${esc(f.name)}</div>
-      <div class="rarity rar-${f.rarity}">${RARITY.find(r=>r.key===f.rarity).name}</div>
+      <div class="rarity rar-${f.rarity}">${RARITY.find((r) => r.key === f.rarity).name}</div>
       <div style="color:${e.color};margin-top:2px;">${e.icon} +${f.xp} ${e.stat} XP</div>
-      <div style="color:#5a6a5e;margin-top:2px;">${f.date}</div></div>`;
+      <div style="color:#5a6a5e;margin-top:2px;">${esc(f.date)}</div></div>`;
     g.appendChild(c);
   });
 }
 
-function renderQuests(){
-  const wrap=$('questList'); wrap.innerHTML='';
-  QUESTS.forEach(q=>{
-    const p=q.prog(S), done=p>=q.target, claimed=S.questsClaimed.includes(q.id);
-    const d=document.createElement('div'); d.className='quest'+(done?' done':'')+(claimed?' claimed':'');
-    d.innerHTML=`<div style="font-size:1.3rem;">${claimed?'✅':done?'❗':'🕸'}</div>
+function renderQuests() {
+  const wrap = $('questList');
+  wrap.innerHTML = '';
+  QUESTS.forEach((q) => {
+    const p = q.prog(S);
+    const done = p >= q.target;
+    const claimed = S.questsClaimed.includes(q.id);
+    const d = document.createElement('div');
+    d.className = 'quest' + (done ? ' done' : '') + (claimed ? ' claimed' : '');
+    d.innerHTML = `<div style="font-size:1.3rem;">${claimed ? '✅' : done ? '❗' : '🕸'}</div>
       <div class="q-body"><div class="q-name">${q.name}</div><div class="q-desc">${q.desc}</div>
-      <div class="bar" style="--c:var(--gold)"><i style="width:${clamp(p/q.target*100,0,100)}%"></i></div>
+      <div class="bar" style="--c:var(--gold)"><i style="width:${clamp((p / q.target) * 100, 0, 100)}%"></i></div>
       <div style="font-size:.64rem;color:var(--ink-dim);margin-top:3px;">${p}/${q.target} · Reward: ${q.rtext}</div></div>`;
-    if(done && !claimed){
-      const b=document.createElement('button'); b.className='btn small green'; b.textContent='Claim';
-      b.addEventListener('click', ()=>{
-        S.questsClaimed.push(q.id); S.points+=q.reward.points||0;
-        save(); sfx.win(); burstAtEl(b,['#f2d060','#7de081'],36);
+    if (done && !claimed) {
+      const b = document.createElement('button');
+      b.className = 'btn small green';
+      b.textContent = 'Claim';
+      b.addEventListener('click', () => {
+        if (S.questsClaimed.includes(q.id)) return;
+        S.questsClaimed.push(q.id);
+        S.points += q.reward.points || 0;
+        save();
+        sfx.win();
+        burstAtEl(b, ['#f2d060', '#7de081'], 36);
         toast(`📜 Quest complete: <b>${q.name}</b> — ${q.rtext}!`);
-        renderQuests(); renderHero();
+        renderQuests();
+        renderHero();
       });
       d.appendChild(b);
     }
@@ -919,204 +1053,212 @@ function renderQuests(){
 }
 
 /* ---------------- Modal Helpers ---------------- */
-function openModal(){ $('modalWrap').classList.remove('hidden'); }
-function closeModal(){ $('modalWrap').classList.add('hidden'); $('modalBox').innerHTML=''; }$('modalWrap').addEventListener('click', e=>{ if(e.target===$('modalWrap') && !$('modalBox').dataset.locked) closeModal(); });
+function openModal() {
+  $('modalWrap').classList.remove('hidden');
+}
+function closeModal() {
+  $('modalWrap').classList.add('hidden');
+  $('modalBox').innerHTML = '';
+}
+$('modalWrap').addEventListener('click', (e) => {
+  if (e.target === $('modalWrap') && !$('modalBox').dataset.locked) closeModal();
+});
 
 /* ---------------- Progression Engine ---------------- */
-let pendingLevelUps=0;
-function addXP(elKey, amt){
-  const st=S.elements[elKey];
-  st.xp+=amt;
-  let leveled=false;
-  while(st.xp >= XP_NEXT(st.level)){
-    st.xp -= XP_NEXT(st.level);
-    st.level++; leveled=true; pendingLevelUps++;
-    S.points+=2;
-  }
-  if(leveled){
+let pendingLevelUps = 0;
+function addXP(elKey, amt) {
+  const result = applyElementXP(S, elKey, amt);
+  if (result.leveled) {
+    pendingLevelUps += result.levelsGained;
     sfx.level();
-    const e=ELEMENTS[elKey];
-    burst(innerWidth/2, innerHeight/2, [e.color,'#f2d060','#7de081','#ffffff'], 90, 8);
-    toast(`⬆ <b>${e.name}</b> reached <b>Level ${st.level}</b>! +2 stat points`);
-    const maxT=unlockedTier(st.level);
-    const key=elKey+':'+maxT;
-    if(maxT>0 && !S.seenUnlocks.includes(key)){
-      S.seenUnlocks.push(key);
-      if(S.equipped[elKey] < maxT) S.equipped[elKey]=maxT;
-      setTimeout(()=>toast(`🛡 TIER ${['I','II','III'][maxT-1]} UNLOCKED: <b>${e.gear[maxT-1]}</b>!`), 1200);
+    const e = ELEMENTS[elKey];
+    burst(innerWidth / 2, innerHeight / 2, [e.color, '#f2d060', '#7de081', '#ffffff'], 90, 8);
+    toast(`⬆ <b>${e.name}</b> reached <b>Level ${result.newLevel}</b>! +${result.levelsGained * 2} stat points`);
+    if (result.newlyUnlockedTier) {
+      const tierIdx = result.newlyUnlockedTier - 1;
+      setTimeout(
+        () => toast(`🛡 TIER ${['I', 'II', 'III'][tierIdx]} UNLOCKED: <b>${e.gear[tierIdx]}</b>!`),
+        1200
+      );
     }
   }
   save();
 }
-function maybeOpenAlloc(){
-  if(pendingLevelUps>0 && S.points>0 && $('modalWrap').classList.contains('hidden')){
-    pendingLevelUps=0; openAllocModal();
+function maybeOpenAlloc() {
+  if (pendingLevelUps > 0 && S.points > 0 && $('modalWrap').classList.contains('hidden')) {
+    pendingLevelUps = 0;
+    openAllocModal();
   }
-}
-
-function rollRarity(){
-  const roll=rnd(0,100); let acc=0;
-  for(const r of RARITY){ acc+=r.w; if(roll<acc) return r; }
-  return RARITY[0];
-}
-function makeSpecimen(elKey, rarity){
-  const e=ELEMENTS[elKey];
-  const name = rarity.key==='legendary' ? e.legend : `${pick(e.pre)} ${pick(e.suf)}`;
-  const xp = Math.round((30+ri(0,15)) * rarity.mult);
-  return { name, xp };
 }
 
 /* ---------------- AI Classification & Fallback ---------------- */
-function classifyPixelsFallback(data){
-  const score={bark:0,leaf:0,stone:0,bloom:0,fungus:0};
-  for(let i=0;i<data.length;i+=4){
-    const r=data[i]/255, g=data[i+1]/255, b=data[i+2]/255;
-    const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
-    const v=mx, s=mx===0?0:d/mx;
-    let h=0;
-    if(d>0){
-      if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4;
-      h*=60; if(h<0) h+=360;
-    }
-    if(v<0.12){ score.bark+=0.5; continue; }
-    if(s<0.14){ score.stone+= v>0.75 ? 1 : 0.7; continue; }
-    if(h>=60 && h<=170){
-      if(s>0.5 && v>0.4) score.leaf+=1; else score.fungus+=0.85;
-    } else if(h>170 && h<=260){ score.bloom+=0.7; }
-    else if(h>260 && h<=340){ score.bloom+=1; }
-    else if(h>340 || h<=12){ score.bloom+=1; }
-    else if(h>12 && h<=32){
-      if(v>0.55 && s>0.55) score.fungus+=0.7; else score.bark+=1;
-    } else if(h>32 && h<=45){ score.bark+= v>0.6? 0.6 : 1; }
-    else { score.bloom+=0.8; }
-  }
-  let best=null, bestV=-1;
-  for(const k of EL_KEYS){ const jitter=rnd(0,0.999); if(score[k]+jitter*0.01>bestV){ bestV=score[k]+jitter*0.01; best=k; } }
-  return best;
-}
-
-function mapLabelToElement(label){
-  const l = label.toLowerCase();
-  if (l.match(/wood|tree|trunk|bark|timber|log|branch|chestnut|acorn/)) return 'bark';
-  if (l.match(/leaf|foliage|plant|fern|grass|herb|clover|ivy|needle|moss/)) return 'leaf';
-  if (l.match(/stone|rock|pebble|mineral|boulder|cliff|sand|slate|granite|flint/)) return 'stone';
-  if (l.match(/flower|petal|bloom|blossom|rose|daisy|dandelion|sunflower|poppy|tulip|orchid|berry/)) return 'bloom';
-  if (l.match(/mushroom|fungus|fungi|bolete|agaric|lichen|spore/)) return 'fungus';
-  return null;
-}
-
 async function classifySpecimenImage(canvas, dataUrl) {
+  let fallbackReason = 'unavailable';
+  let topLabel = null;
+
   if (aiClassifier) {
     try {
       const results = await aiClassifier(dataUrl, { topk: 5 });
+      if (Array.isArray(results) && results.length > 0) {
+        topLabel = results[0].label || null;
+      }
       for (const res of results) {
         const mapped = mapLabelToElement(res.label);
         if (mapped) {
-          console.log(`Open AI Classification: ${res.label} -> ${mapped} (${(res.score*100).toFixed(1)}%)`);
-          return mapped;
+          console.log(`Open AI Classification: ${res.label} -> ${mapped} (${(res.score * 100).toFixed(1)}%)`);
+          return { elKey: mapped, method: 'ai', label: res.label, score: res.score };
         }
       }
+      fallbackReason = 'unmatched';
     } catch (err) {
+      fallbackReason = 'error';
       console.warn('AI inference pass failed, using fallback:', err);
     }
   }
-  const data = canvas.getContext('2d').getImageData(0,0,48,48).data;
-  return classifyPixelsFallback(data);
+
+  const data = canvas.getContext('2d').getImageData(0, 0, 48, 48).data;
+  const elKey = classifyPixelsFallback(data);
+  return { elKey, method: 'fallback', reason: fallbackReason, topLabel };
 }
 
 /* ---------------- Trail Harvest Logic ---------------- */
-$('harvestBtn').addEventListener('click', ()=>{ sfx.click(); $('fileInput').click(); });$('fileInput').addEventListener('change', e=>{
-  const f=e.target.files && e.target.files[0];
-  e.target.value='';
-  if(!f) return;
+$('harvestBtn').addEventListener('click', () => {
+  sfx.click();
+  $('fileInput').click();
+});
+
+$('fileInput').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
 
   if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
 
-  const rd=new FileReader();
-  rd.onload=()=>{
-    const img=new Image();
-    img.onload=async ()=>{
-      const tc=document.createElement('canvas'); tc.width=tc.height=48;
-      const tctx=tc.getContext('2d');
-      const side=Math.min(img.width,img.height);
-      tctx.drawImage(img,(img.width-side)/2,(img.height-side)/2,side,side,0,0,48,48);
-      let thumb=null; try{ thumb=tc.toDataURL('image/jpeg',0.6); }catch(err){}
+  const rd = new FileReader();
+  rd.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      if (!img.width || !img.height) {
+        toast('⚠ The Realm could not read that image.');
+        return;
+      }
+      const tc = document.createElement('canvas');
+      tc.width = 48;
+      tc.height = 48;
+      const tctx = tc.getContext('2d');
+      const side = Math.min(img.width, img.height);
+      tctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 48, 48);
+      let thumb = null;
+      try {
+        thumb = tc.toDataURL('image/jpeg', 0.6);
+      } catch (err) {}
 
-      runScan(async ()=>{
-        const elKey = await classifySpecimenImage(tc, rd.result);
-        completeFind(elKey, thumb, true);
+      runScan(async () => {
+        const classification = await classifySpecimenImage(tc, rd.result);
+        completeFind(classification.elKey, thumb, true, classification);
       });
     };
-    img.onerror=()=>toast('⚠ The Realm could not read that image.');
-    img.src=rd.result;
+    img.onerror = () => toast('⚠ The Realm could not read that image.');
+    img.src = rd.result;
   };
   rd.readAsDataURL(f);
 });
 
-$('btnForage').addEventListener('click', ()=>{
+$('btnForage').addEventListener('click', () => {
   sfx.click();
-  const elKey=pick(EL_KEYS);
-  runScan(()=>completeFind(elKey, null, false));
+  const elKey = pick(EL_KEYS);
+  runScan(() => completeFind(elKey, null, false, { method: 'forage' }));
 });
 
-function runScan(cb){
-  $('scanZone').classList.remove('hidden');$('harvestBtn').disabled=true;
-  let dots=0;
-  const iv=setInterval(()=>{ dots=(dots+1)%4; $('scanDots').textContent='…'.slice(0,1+dots); }, 240);
-  [392,440,494,587].forEach((f,i)=>beep(f,.07,'triangle',.07,i*.22));
-  setTimeout(async ()=>{
+function runScan(cb) {
+  $('scanZone').classList.remove('hidden');
+  $('harvestBtn').disabled = true;
+  $('btnForage').disabled = true;
+  let dots = 0;
+  const iv = setInterval(() => {
+    dots = (dots + 1) % 3;
+    $('scanDots').textContent = '.'.repeat(1 + dots);
+  }, 240);
+  [392, 440, 494, 587].forEach((f, i) => beep(f, 0.07, 'triangle', 0.07, i * 0.22));
+  setTimeout(async () => {
     clearInterval(iv);
-    $('scanZone').classList.add('hidden');$('harvestBtn').disabled=false;
-    await cb();
+    $('scanZone').classList.add('hidden');
+    try {
+      await cb();
+    } finally {
+      $('harvestBtn').disabled = false;
+      $('btnForage').disabled = false;
+    }
   }, 1100);
 }
 
-function completeFind(elKey, thumb, byCamera){
-  const rarity=rollRarity();
-  const spec=makeSpecimen(elKey, rarity);
-  const e=ELEMENTS[elKey];
-  S.finds.push({ el:elKey, name:spec.name, rarity:rarity.key, xp:spec.xp, thumb,
-    date:new Date().toLocaleDateString(undefined,{month:'short',day:'numeric'}) });
+function completeFind(elKey, thumb, byCamera, classification) {
+  const rarity = rollRarity();
+  const spec = makeSpecimen(elKey, rarity);
+  S.finds.push({
+    el: elKey,
+    name: spec.name,
+    rarity: rarity.key,
+    xp: spec.xp,
+    thumb,
+    date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+  });
   S.stats.finds++;
-  if(byCamera) S.stats.camFinds++; else S.stats.forages++;
-  if(rarity.key==='legendary'||rarity.key==='rare') sfx.rare(); else sfx.find();
+  if (byCamera) S.stats.camFinds++;
+  else S.stats.forages++;
+  if (rarity.key === 'legendary' || rarity.key === 'rare') sfx.rare();
+  else sfx.find();
   addXP(elKey, spec.xp);
   save();
-  showFindCard(elKey, spec, rarity, thumb, byCamera);
+  showFindCard(elKey, spec, rarity, thumb, byCamera, classification);
   renderAll();
 }
 
-function showFindCard(elKey, spec, rarity, thumb, byCamera){
-  const e=ELEMENTS[elKey];
-  const box=$('modalBox');
-  box.dataset.locked='1';
-  box.innerHTML=`<div class="find-card">
+function showFindCard(elKey, spec, rarity, thumb, byCamera, classification) {
+  const e = ELEMENTS[elKey];
+  const box = $('modalBox');
+  box.dataset.locked = '1';
+  const sourceNote = describeFindSource(byCamera, classification);
+  box.innerHTML = `<div class="find-card">
     <div class="rarity rar-${rarity.key}">${rarity.name} Specimen</div>
     <h2 class="rune-title" style="font-size:1.25rem;margin:6px 0;">${esc(spec.name)}</h2>
-    ${thumb?`<img class="find-thumb" src="${thumb}" alt="specimen photo">`:`<div style="font-size:3.4rem;margin:10px 0;">${e.icon}</div>`}
+    ${thumb ? `<img class="find-thumb" src="${esc(thumb)}" alt="specimen photo">` : `<div style="font-size:3.4rem;margin:10px 0;">${e.icon}</div>`}
     <div style="font-size:.8rem;color:${e.color};font-weight:bold;">${e.icon} ${e.name} — +${spec.xp} ${e.stat} XP</div>
-    <div style="font-size:.68rem;color:var(--ink-dim);margin:8px 0 14px;">${byCamera?'Analyzed by open-weight vision model beneath open sky.':'Gathered by hand along the trail.'}</div>
+    <div style="font-size:.68rem;color:var(--ink-dim);margin:8px 0 14px;">${sourceNote}</div>
     <button class="btn green block" id="btnFindOk">Add to Codex</button>
   </div>`;
   openModal();
-  const mc=$('modalBox').getBoundingClientRect();
-  burst(mc.left+mc.width/2, mc.top+mc.height/2, [e.color,'#f2d060','#ffffff'], rarity.key==='legendary'?90:40, 7);
-  $('btnFindOk').addEventListener('click', ()=>{
-    sfx.click(); delete box.dataset.locked; closeModal();
+  const mc = $('modalBox').getBoundingClientRect();
+  burst(mc.left + mc.width / 2, mc.top + mc.height / 2, [e.color, '#f2d060', '#ffffff'], rarity.key === 'legendary' ? 90 : 40, 7);
+  $('btnFindOk').addEventListener('click', () => {
+    sfx.click();
+    delete box.dataset.locked;
+    closeModal();
     setTimeout(maybeOpenAlloc, 250);
   });
 }
 
 /* ---------------- Boot ---------------- */
-(function boot(){
+(function boot() {
   syncTitleButtons();
-  const cv=$('titleEmblem'), ctx=cv.getContext('2d');
-  const px=(x,y,w,h,c)=>{ ctx.fillStyle=c; ctx.fillRect(x,y,w,h); };
-  px(8,4,8,4,'#2f5d3a'); px(7,8,10,8,'#3f7a4c'); px(6,10,12,6,'#2f5d3a');
-  px(9,10,6,2,'#08120c'); px(11,10,2,2,'#f2d060');
-  px(11,4,2,10,'#c9a227'); px(7,16,10,2,'#c9a227');
-  px(10,18,4,3,'#2f5d3a'); px(4,8,2,4,'#4caf50'); px(18,8,2,4,'#4caf50');
-  px(4,6,1,2,'#7de081'); px(19,6,1,2,'#7de081');
+  const cv = $('titleEmblem');
+  const ctx = cv.getContext('2d');
+  const px = (x, y, w, h, c) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  px(8, 4, 8, 4, '#2f5d3a');
+  px(7, 8, 10, 8, '#3f7a4c');
+  px(6, 10, 12, 6, '#2f5d3a');
+  px(9, 10, 6, 2, '#08120c');
+  px(11, 10, 2, 2, '#f2d060');
+  px(11, 4, 2, 10, '#c9a227');
+  px(7, 16, 10, 2, '#c9a227');
+  px(10, 18, 4, 3, '#2f5d3a');
+  px(4, 8, 2, 4, '#4caf50');
+  px(18, 8, 2, 4, '#4caf50');
+  px(4, 6, 1, 2, '#7de081');
+  px(19, 6, 1, 2, '#7de081');
   show('scr-title');
 })();
 </script>
