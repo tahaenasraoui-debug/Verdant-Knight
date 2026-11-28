@@ -136,6 +136,27 @@ node --test
 
 ---
 
+## Contributing
+
+Contributions, bug reports, and feature suggestions are welcome. For larger changes or new features, please open an issue first to discuss the approach before writing code.
+
+1. Fork the repository and create a branch from `main` (e.g., `git checkout -b fix/short-description` or `feat/short-description`).
+2. Keep pull requests focused on a single change and follow the existing code style.
+3. Run the local checks before opening a PR:
+
+   ```bash
+   node --test
+   node --check sw.js
+   ```
+
+4. Open a Pull Request describing what changed and why (include a screenshot or GIF for UI/canvas changes, and link any related issue).
+
+Preserve the offline-first, zero-build static web architecture.
+
+When reporting bugs, please include steps to reproduce, expected vs. actual behavior, and your environment details (OS and browser version).
+
+---
+
 ## License
 
 This project is open-source and available under the [MIT License](LICENSE).
